@@ -1,1 +1,472 @@
 Projects
+
+`include "uvm_macros.svh"
+import uvm_pkg::*;
+
+interface fifo_if();
+  
+  logic rd;
+  logic wr;
+  logic clk;
+  logic rst;
+  logic full;
+  logic empty;
+  logic [7:0] d_in;
+  logic [7:0] d_out;
+  logic [3:0] count;
+  
+endinterface
+
+class transaction extends uvm_sequence_item;
+  
+  rand bit [7:0] d_in;
+  rand bit rd;
+  rand bit wr;
+  rand bit rst;
+  bit full;
+  bit empty;
+  bit [7:0] d_out;
+  bit [3:0] count;
+  
+  constraint c1 {wr != rd;}
+  
+  function new(input string inst = "transaction");
+    super.new(inst);
+  endfunction
+  
+  `uvm_object_utils_begin(transaction)
+  `uvm_field_int(d_in, UVM_DEFAULT)
+  `uvm_field_int(rst, UVM_DEFAULT)
+  `uvm_field_int(rd, UVM_DEFAULT)
+  `uvm_field_int(wr, UVM_DEFAULT)
+  `uvm_field_int(full, UVM_DEFAULT)
+  `uvm_field_int(empty, UVM_DEFAULT)
+  `uvm_field_int(d_out, UVM_DEFAULT)
+  `uvm_field_int(count, UVM_DEFAULT)
+  `uvm_object_utils_end
+  
+endclass
+
+
+class generator extends uvm_sequence #(transaction);
+  
+  `uvm_object_utils(generator)
+  
+  transaction t;
+  
+  function new(input string inst = "GEN");
+    super.new(inst);
+  endfunction
+  
+   virtual task body();
+    t = transaction::type_id::create("t");
+    repeat(50)
+      begin
+        start_item(t);
+        t.randomize() with {t.rst == 1;};
+        finish_item(t);
+        `uvm_info("GEN",$sformatf("Data send to Driver d_in : %0d",t.d_in),UVM_NONE);
+      end
+    
+    repeat(50)
+      begin
+        start_item(t);
+        t.randomize() with {t.d_in inside {[0:100]} && t.rst == 1;};
+        finish_item(t);
+        `uvm_info("GEN",$sformatf("Data send to Driver d_in : %0d",t.d_in),UVM_NONE);
+      end
+     
+     repeat(50)
+      begin
+        start_item(t);
+        t.randomize() with {t.d_in inside {[101:200]} && t.rst == 1;};
+        finish_item(t);
+        `uvm_info("GEN",$sformatf("Data send to Driver d_in : %0d",t.d_in),UVM_NONE);
+      end
+     
+     repeat(50)
+      begin
+        start_item(t);
+        t.randomize() with {t.d_in inside {[200:255]} && t.rst == 1;};
+        finish_item(t);
+        `uvm_info("GEN",$sformatf("Data send to Driver d_in : %0d",t.d_in),UVM_NONE);
+      end
+   endtask
+  
+endclass
+
+class generator2 extends uvm_sequence #(transaction);
+  
+  `uvm_object_utils(generator2)
+  
+  transaction t;
+  
+  function new(input string inst = "GEN2");
+    super.new(inst);
+  endfunction
+  
+  virtual task body();
+    t = transaction::type_id::create("t");
+      begin
+        start_item(t);
+        t.randomize() with {t.rst == 0;};
+        finish_item(t);
+        `uvm_info("GEN2", $sformatf("Data send to Driver d_in : %0d, rst : %0d", t.d_in, t.rst),UVM_NONE);
+      end
+  endtask
+  
+endclass
+
+class generator3 extends uvm_sequence#(transaction);
+  
+  `uvm_object_utils(generator3)
+  
+  transaction t;
+  
+  function new(input string inst = "GEN3");
+    super.new(inst);
+  endfunction
+  
+  virtual task body();
+    t = transaction::type_id::create("t");
+    repeat(10)
+      begin
+        start_item(t);
+        t.randomize() with {t.wr == 1 && t.rst == 1;};
+        finish_item(t);
+        `uvm_info("GEN3", $sformatf("Data send to Driver d_in : %0d, rst : %0d", t.d_in, t.rst),UVM_NONE);
+      end
+  endtask
+  
+endclass
+
+class generator4 extends uvm_sequence #(transaction);
+  
+  `uvm_object_utils(generator4)
+  
+  transaction t;
+  
+  function new(input string inst = "GEN4");
+    super.new(inst);
+  endfunction
+  
+  virtual task body();
+    t = transaction::type_id::create("t");
+    repeat(10)
+      begin
+        start_item(t);
+        t.randomize() with {t.rd == 1 && t.rst == 1;};
+        finish_item(t);
+        `uvm_info("GEN4", $sformatf("Data send to Driver d_in : %0d, rst : %0d", t.d_in, t.rst),UVM_NONE);
+      end
+  endtask
+  
+endclass
+
+class sequencer extends uvm_sequencer #(transaction);
+
+  `uvm_component_utils(sequencer) 
+
+  function new(input string inst = "SEQR", uvm_component c);
+    super.new(inst, c);
+  endfunction
+  
+endclass
+
+class driver extends uvm_driver#(transaction);
+  
+  `uvm_component_utils(driver)
+  
+  function new(input string inst = "DRV", uvm_component c);
+    super.new(inst, c);
+  endfunction
+  
+  transaction data;
+  virtual fifo_if fif;
+  
+  task reset_dut();
+    fif.rst <= 1'b0;
+    fif.d_in <= 0;
+    fif.wr <= 0;
+    fif.rd <= 0;
+    repeat(5) @(posedge fif.clk);
+    fif.rst <= 1'b1;
+    #20;
+    `uvm_info("DRV", "Reset Done", UVM_NONE);
+  endtask
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    data = transaction::type_id::create("data");
+    
+    if(!uvm_config_db #(virtual fifo_if)::get(this,"","fif", fif))
+      `uvm_error("DRV", "Unable to access uvm_config_db");
+  endfunction
+  
+  virtual task run_phase(uvm_phase phase);
+    reset_dut();
+    forever begin
+      seq_item_port.get_next_item(data);
+      if (data.wr == 1)  begin
+        fif.d_in <= data.d_in;
+      end
+      fif.wr <= data.wr;
+      fif.rd <= data.rd;
+      fif.rst <= data.rst;
+      seq_item_port.item_done();
+      `uvm_info("DRV", $sformatf("Trigger DUT d_in : %0d", data.d_in), UVM_NONE);
+      @(posedge fif.clk);
+    end
+  endtask
+  
+endclass
+
+class monitor extends uvm_monitor;
+  
+  `uvm_component_utils(monitor)
+  
+  uvm_analysis_port#(transaction) send;
+  
+  function new(input string inst = "MON", uvm_component c);
+    super.new(inst, c);
+    send = new("Write", this);
+  endfunction
+  
+  transaction t;
+  virtual fifo_if fif;
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    t = transaction::type_id::create("TRANS");
+    if(!uvm_config_db #(virtual fifo_if)::get(this,"","fif", fif))
+      `uvm_error("MON", "Unable to access uvm_config db");
+  endfunction
+  
+  virtual task run_phase(uvm_phase phase);
+    @(negedge fif.clk);
+    forever begin
+      @(posedge fif.clk);
+      t.d_in = fif.d_in;
+      t.rd = fif.rd;
+      t.wr = fif.wr;
+      t.rst = fif.rst;
+      t.empty = fif.empty;
+      t.full = fif.full;
+      #1;
+      t.count = fif.count;
+      t.d_out = fif.d_out;  
+      `uvm_info("MON", $sformatf("Data send to Scoreboard d_in : %0d and d_out : %0d", t.d_in, t.d_out), UVM_NONE);
+      send.write(t);
+    end
+  endtask
+  
+endclass
+
+class scoreboard extends uvm_scoreboard;
+  
+  `uvm_component_utils(scoreboard)
+  
+  int queue[$]; 
+  bit [7:0] expected_data;
+
+  uvm_analysis_imp#(transaction, scoreboard) recv;
+  
+  transaction data;
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    data = transaction::type_id::create("TRANS");
+  endfunction
+  
+  function new(input string inst = "SCO", uvm_component c);
+    super.new(inst, c);
+    recv = new("Write", this);
+  endfunction
+  
+  function void write (transaction t);
+    data = t;
+    `uvm_info("SCO", $sformatf("Data received from monitor, d_in : %0d and d_out : %0d", t.d_in,t.d_out), UVM_NONE);
+    
+    if(data.rst == 1) begin
+      
+      if(queue.size() == 0) begin
+        
+        if(data.empty == 1) begin
+          `uvm_info("SCO",$sformatf("DUT EMPTY SUCCESS ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| empty : %0d and expected empty : 1 is the same", data.d_in,data.d_out,data.empty),UVM_NONE);
+        end
+        
+        else begin
+          `uvm_error("SCO",$sformatf("DUT EMPTY ERROR.. ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| empty : %0d and expected empty : 1 is NOT the same", data.d_in,data.d_out,data.empty));
+        end
+        
+      end
+      
+      if(queue.size() == 8) begin
+        
+        if(data.full == 1) begin
+          `uvm_info("SCO",$sformatf("DUT FULL SUCCESS ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| full : %0d and expected full : 1 is the same", data.d_in,data.d_out,data.full),UVM_NONE);
+        end
+        
+        else begin
+          `uvm_error("SCO",$sformatf("DUT FULL ERROR.. ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| full : %0d and expected full : 1 is NOT the same", data.d_in,data.d_out,data.full));
+        end
+        
+      end
+      
+      if(data.wr == 1 && data.full == 0) begin 
+        queue.push_back(data.d_in);
+        `uvm_info("SCO", $sformatf("Pushed data into queue, d_in : %0d", t.d_in), UVM_NONE);
+      end
+      
+      else if(data.rd == 1 && data.empty == 0) begin
+          
+        expected_data = queue.pop_front();
+        `uvm_info("SCO", $sformatf("Popped data from queue, expected_data : %0d", expected_data), UVM_NONE);
+          
+        if (expected_data == t.d_out) begin
+          `uvm_info("SCO",$sformatf("DUT SUCCESS ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| d_out : %0d and expected_data : %0d is the same", data.d_in,data.d_out,data.d_out,expected_data),UVM_NONE);
+        end
+          
+        else begin
+          `uvm_error("SCO",$sformatf("DUT ERROR.. ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| d_out : %0d and expected_data : %0d is NOT the same", data.d_in,data.d_out,data.d_out,expected_data));
+        end
+      
+      end
+    
+    end
+    
+    else if(data.rst == 0) begin
+      
+      queue.delete();
+      
+      if(data.count == 0) begin
+        `uvm_info("SCO",$sformatf("DUT RESET SUCCESS ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| count : %0d and expected count : 0 is the same", data.d_in,data.d_out,data.count),UVM_NONE);
+      end
+      
+      else begin
+        `uvm_error("SCO",$sformatf("DUT RESET ERROR.. ||||||||||||||||| d_in : %0d , d_out : %0d |||||||||||||||||||||||||||||||||| count : %0d and expected count : 0 is NOT the same", data.d_in,data.d_out,data.count));
+      end
+      
+    end
+  endfunction
+  
+endclass
+
+class agent extends uvm_agent;
+  
+  `uvm_component_utils(agent)
+  
+  function new(input string inst = "AGENT", uvm_component c);
+    super.new(inst, c);
+  endfunction
+  
+  monitor m;
+  driver d;
+  sequencer seqr;
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    m = monitor::type_id::create("MON", this);
+    d = driver::type_id::create("DRV", this);
+    seqr = sequencer::type_id::create("SEQR",this);
+  endfunction
+  
+  virtual function void connect_phase(uvm_phase phase);
+    super.connect_phase(phase);
+    d.seq_item_port.connect(seqr.seq_item_export);
+  endfunction
+  
+endclass
+
+class env extends uvm_env;
+  
+  `uvm_component_utils(env)
+  
+  function new(input string inst = "ENV", uvm_component c);
+    super.new(inst, c);
+  endfunction
+  
+  scoreboard s;
+  agent a;
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    s = scoreboard::type_id::create("SCO", this);
+    a = agent::type_id::create("AGENT", this);
+  endfunction
+  
+  virtual function void connect_phase(uvm_phase phase);
+    super.connect_phase(phase);
+    a.m.send.connect(s.recv);
+  endfunction
+  
+endclass
+
+class test extends uvm_test;
+  
+  `uvm_component_utils(test)
+  
+  function new(input string inst = "TEST", uvm_component c);
+    super.new(inst, c);
+  endfunction
+  
+  generator gen;
+  generator2 gen2;
+  generator3 gen3;
+  generator4 gen4;
+  env e;
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    gen = generator::type_id::create("GEN", this);
+    gen2 = generator2::type_id::create("GEN2", this);
+    gen3 = generator3::type_id::create("GEN3", this);
+    gen4 = generator4::type_id::create("GEN4", this);
+    e = env::type_id::create("ENV", this);
+  endfunction
+  
+  virtual task run_phase(uvm_phase phase);
+    phase.raise_objection(this);
+    gen.start(e.a.seqr);
+    #60;
+    gen2.start(e.a.seqr);
+    #60;
+    fork
+      gen.start(e.a.seqr);
+      begin
+        #($urandom_range(10,3000));
+        gen2.start(e.a.seqr);
+      end
+    join
+    #60;
+    gen3.start(e.a.seqr);
+    #60;
+    gen4.start(e.a.seqr);
+    #60;
+    phase.drop_objection(this);
+  endtask
+  
+endclass
+
+module fifo_tb();
+  
+  fifo_if fif();
+  
+  initial begin
+    fif.clk = 0;
+  end
+  
+  always #10 fif.clk = ~fif.clk;
+  
+  fifo dut (.d_in(fif.d_in), .rd(fif.rd), .wr(fif.wr), .clk(fif.clk), .rst(fif.rst), .full(fif.full), .empty(fif.empty), .d_out(fif.d_out), .count(fif.count));
+  
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars;
+  end
+  
+  initial begin
+    uvm_config_db#(virtual fifo_if)::set(null, "*", "fif", fif);
+    run_test("test");
+  end
+endmodule
